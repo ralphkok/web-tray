@@ -1,0 +1,144 @@
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="
+      default-src 'self' 'unsafe-inline';
+      img-src 'self' data:
+    ">
+    <title>App config</title>
+    <style>
+      html, body {
+        background-color: #e0e0e0;
+      }
+      #status {
+        visibility: hidden;
+        width: 100%;
+        padding: 0.5em;
+        box-sizing: border-box;
+        background: lightgreen;
+      }
+      #status[data-error] {
+        background: lightcoral;
+      }
+      #status[data-active] {
+        visibility: visible;
+      }
+      .control {
+        display: block;
+        padding: 0.5em 1em;
+      }
+      .control>* {
+        display: inline;
+      }
+      #app-icon {
+        width: 20px;
+        height: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Configuration</h1>
+    <p id="status">&nbsp;</p>
+    <div class="controls">
+      <div class="control">
+        <p>App title:</p>
+        <input id="app-title" type="text" value="">
+      </div>
+      <div class="control">
+        <p>App icon:</p>
+        <img id="app-icon" />
+        <input id="icon-input" type="file" accept="image/png, image/jpeg">
+      </div>
+      <div class="control">
+        <p>Load URL:</p>
+        <input id="app-url" type="text" value="" placeholder="http://">
+      </div>
+      <div class="control">
+        <button id="submit" type="submit" disabled>Save</button>
+      </div>
+    </div>
+    <script type="application/javascript">
+      window.onload = () => {
+        const { ipcRenderer } = require("electron");
+        let timeout;
+        let iconLarge = null;
+        let iconSmall = null;
+
+        const showStatus = (text, isError = false) => {
+          const status = document.getElementById("status");
+          status.innerText = text;
+          if (isError) {
+            status.setAttribute("data-error", true);
+          } else {
+            status.removeAttribute("data-error");
+          }
+          status.setAttribute("data-active", true);
+          hideStatusAfterDelay();
+        }
+
+        const hideStatusAfterDelay = (delay = 3000) => {
+          clearTimeout(timeout);
+          timeout = setTimeout(() => {
+            const status = document.getElementById("status");
+            status.removeAttribute("data-active");
+            status.removeAttribute("data-error");
+            status.innerHTML = "&nbsp;";
+          }, delay);
+        };
+
+        const getBase64 = async (file, width, height) => {
+          const bitmap = await createImageBitmap(file);
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          const scale = Math.min(canvas.width / bitmap.width, canvas.height / bitmap.height);
+          ctx.drawImage(
+            bitmap,
+            0.5 * (canvas.width - scale * bitmap.width),
+            0.5 * (canvas.width - scale * bitmap.height),
+            scale * bitmap.width,
+            scale * bitmap.height
+          );
+          return canvas.toDataURL("image/png");
+        }
+
+        const getAppConfig = () => ipcRenderer.send("get-app-config");
+        const setAppConfig = (title, url, base64Large, base64Small) => ipcRenderer.send("set-app-config", title, url, base64Large, base64Small);
+
+        ipcRenderer.on("get-app-config-response", (event, config) => {
+          document.getElementById("app-title").value = config.title;
+          document.getElementById("app-url").value = config.url;
+          document.getElementById("app-icon").src = `data:image/png;base64,${config.icon}`;
+          
+          document.getElementById("icon-input").onchange = async (event) => {
+            const { files } = event.target;
+            if (files.length > 0) {
+              iconLarge = await getBase64(files[0], 40, 40);
+              iconSmall = await getBase64(files[0], 20, 20);
+              document.getElementById("app-icon").src = iconSmall;
+            }
+          };
+
+          document.getElementById("submit").onclick = () => setAppConfig(
+            document.getElementById("app-title").value,
+            document.getElementById("app-url").value,
+            iconLarge,
+            iconSmall,
+          );
+          document.getElementById("submit").removeAttribute("disabled");
+        });
+
+        ipcRenderer.on("set-app-config-response", (event, err) => {
+          if (err) {
+            showStatus(`Error saving preferences. ${err}`, true);
+          } else {
+            showStatus(`Preferences saved successfully`, false);
+          }
+        });
+
+        getAppConfig();
+      }
+    </script>
+  </body>
+</html>
