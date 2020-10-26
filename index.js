@@ -1,9 +1,7 @@
 const path = require('path');
-const { menubar } = require('menubar');
-const { BrowserWindow, Menu, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const url = require('url');
-const { readFile, writeFile } = require('fs');
-const sharp = require('sharp');
+const { readFile, writeFile, mkdirSync } = require('fs');
 
 const commandLineArgs = require('command-line-args');
 const args = commandLineArgs([
@@ -11,47 +9,21 @@ const args = commandLineArgs([
 ]);
 
 const baseDir = args.debug
-  ? path.resolve(__dirname)
-  : path.join(__dirname, '..');
+? path.resolve(__dirname)
+: path.join(__dirname, '..');
 
-let isQuitRequested = false;
+const appTemplateDir = path.join(baseDir, 'app-template');
 
-/**
- * Open new windows in a separate, movable, closable window.
- */
-const onNewWindow = (event, url, frameName, disposition, options, additionalFeatures, referrer, postBody) => {
-  event.preventDefault();
-  const win = new BrowserWindow({
-    webContents: options.webContents, // use existing webContents if provided
-    show: false,
-    autoHideMenuBar: false,
-    movable: true,
-    resizable: true,
-    focusable: true,
-    closable: true,
-  });
-  win.once('ready-to-show', () => win.show());
-  if (!options.webContents) {
-    const loadOptions = {
-      httpReferrer: referrer
-    };
-    if (postBody != null) {
-      const { data, contentType, boundary } = postBody;
-      loadOptions.postData = postBody.data;
-      loadOptions.extraHeaders = `content-type: ${contentType}; boundary=${boundary}`;
-    }
-
-    win.loadURL(url, loadOptions); // existing webContents will be navigated automatically
-  }
-  event.newGuest = win;
-};
+const shelljs = require(args.debug ? 'shelljs' : path.join(baseDir, 'node_modules/shelljs'));
 
 /**
  * Open a window with configuration preferences.
  */
-const openConfigWindow = () => {
+const createWindow = () => {
   // create config window
-  const configWindow = new BrowserWindow({
+  const win = new BrowserWindow({
+    width: 800,
+    height: 600,
     show: true,
     autoHideMenuBar: false,
     movable: true,
@@ -63,70 +35,44 @@ const openConfigWindow = () => {
     },
   });
   // load the config page
-  configWindow.loadURL(url.format({
+  win.loadURL(url.format({
     pathname: path.join(baseDir, 'assets/config.html'),
     protocol: 'file:',
     slashes: true
   }));
   // show developer tools when in debug mode
   if (args.debug) {
-    configWindow.webContents.openDevTools();
+    win.webContents.openDevTools();
   }
-  // Prevent closing of the aplication when the window closes
-  configWindow.on('close', event => {
-    if (!isQuitRequested) {
-      event.preventDefault();
-      configWindow.hide();
-      return false;
-    }
-    return true;
-  });
 }
 
-/**
- * Load the config settings from file
- */
-const readConfig = () => (
-  new Promise((resolve, reject) => {
-    const configPath = path.join(baseDir, 'assets/config.json');
-    readFile(configPath, async (err, data) => {
-      if (!err) {
-        resolve(JSON.parse(data));
-      } else {
-        reject(err);
-      }
-    });
-  })
-);
+app.on('ready', createWindow);
+
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") {
+    app.quit();
+  }
+});
+
+app.on("activate", () => {
+  if (win === null) {
+    createWindow();
+  }
+});
 
 /**
- * Save config settings to file
- * @param {*} config 
+ * Save image data to file for the tray icon
+ * @param {*} icon Base64 encoded string representing the icon
  */
-const writeConfig = (config) => (
-  new Promise((resolve, reject) => {
-    const configPath = path.join(baseDir, 'assets/config.json');
-    console.log(JSON.stringify(config, "\t"));
-    writeFile(configPath, JSON.stringify(config, null, "\t"), resolve);
-  })
-);
-
-/**
- * Load an image and return it as a base64 encoded string
- * @param {*} icon 
- */
-const getBase64 = (icon) => (
-  new Promise((resolve, reject) => {
-    readFile(icon, (err, img) => {
-      if (!err && img) {
-        // convert image to base64 encoded string
-        resolve(Buffer.from(img).toString('base64'));
-      } else {
-        reject(err);
-      }
-    });
-  })
-);
+const saveAppIcon = async (icon) => {
+  const [ imageType, base64 ] = icon.split('base64,');
+  if (base64) {
+    const dir = path.join(appTemplateDir, `build`);
+    mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, `icon.png`);
+    await writeBase64ToFile(base64, filePath);
+  }
+};
 
 /**
  * Save image data to file for the tray icon
@@ -136,8 +82,10 @@ const getBase64 = (icon) => (
 const saveTrayIcon = async (icon, isLargeIcon) => {
   const [ imageType, base64 ] = icon.split('base64,');
   if (base64) {
+    const dir = path.join(appTemplateDir, `assets/icons`);
+    mkdirSync(dir, { recursive: true });
     const fileName = `tray${isLargeIcon ? '@2x' : ''}.png`;
-    const filePath = path.join(baseDir, `assets/icons/${fileName}`);
+    const filePath = path.join(dir, fileName);
     await writeBase64ToFile(base64, filePath);
   }
 };
@@ -154,115 +102,106 @@ const writeBase64ToFile = (base64, filePath) => (
   })
 );
 
-const start = async () => {
-  const config = await readConfig();
-
-  /**
-   * Create the main menubar application.
-   */
-  const mb = menubar({
-    dir: path.resolve(__dirname),
-    index: config.url,
-    browserWindow: {
-      width: 600,
-      height: 800,
-      movable: true,
-      resizable: true,
-      focusable: true,
-      webPreferences: {
-        nodeIntegration: false,
-        contextIsolation: true,
-        webSecurity: true
-      }
-    }
-  });
-
-  mb.on('ready', () => {
-    // set tray icon
-    mb.tray.setImage(
-      args.debug
-      ? path.resolve(mb.app.getAppPath(), 'assets/icons/tray.png')
-      : path.resolve(mb.app.getAppPath(), '..', 'assets/icons/tray.png')
-    );
-
-    // create context menu
-    const contextMenu = Menu.buildFromTemplate([
-      { label: 'Reload window', click: () => mb.window.reload() },
-      { label: 'Preferences', click: openConfigWindow },
-      {
-        label: 'Quit',
-        click: () => {
-          isQuitRequested = true;
-          mb.app.quit();
-        }
-      },
-    ]);
-    mb.tray.on('right-click', () => mb.tray.popUpContextMenu(contextMenu));
-  });
-
-  /**
-   * Listen for new windows being opened.
-   */
-  mb.on('after-create-window', async () => {
-    mb.window.webContents.on('new-window', onNewWindow);
-    const { url } = await readConfig();
-    if (mb.window.url !== url) {
-      mb.window.loadURL(url);
-    }
-  });
-
-  /**
-   * Return config data from file
-   */
-  ipcMain.on('get-app-config', async event => {
-    // load config from file
-    const { title, icon, url } = await readConfig();
-    // load icon
-    getBase64(icon)
-      .then(base64 => {
-        // send response with config data
-        event.reply('get-app-config-response', {
-          title,
-          icon: base64,
-          url
-        });
-      })
-      .catch(err => {
-        console.error(err);
-        // send response with empty icon
-        event.reply('get-app-config-response', {
-          title,
-          icon: '',
-          url
-        });
-      });
-  });
-
-  /**
-   * Store app config data in JSON file
-   */
-  ipcMain.on('set-app-config', async (event, title, url, iconLarge, iconSmall) => {
+/**
+ * Save config settings to file
+ * @param {*} config 
+ */
+const writeAppConfig = (config) => (
+  new Promise((resolve, reject) => {
     try {
-      if (iconLarge && iconSmall) {
-        await saveTrayIcon(iconLarge, true);
-        await saveTrayIcon(iconSmall, false);
-      }
-      const config = await readConfig();
-      await writeConfig({
-        ...config,
-        title,
-        url
-      });
-      event.reply('set-app-config-response', null);
-      mb.app.setName(title);
-      mb.index = url;
-      if (mb.window) {
-        mb.window.loadURL(url);
-      }
+      const dir = path.join(appTemplateDir, 'assets');
+      mkdirSync(dir, { recursive: true });
+      const configPath = path.join(dir, 'config.json');
+      console.log(JSON.stringify(config, "\t"));
+      writeFile(configPath, JSON.stringify(config, null, "\t"), resolve);
     } catch (err) {
-      event.reply('set-app-config-response', err.toString());
+      reject(err);
     }
-  });
-};
+  })
+);
 
-start();
+/**
+ * Create a package.json file for the new app, based on a template file
+ * @param {*} appTitle 
+ */
+const createAppPackageFile = async (appTitle) => {
+  // load the contents of the template file
+  const json = await new Promise((resolve, reject) => {
+    readFile(path.join(appTemplateDir, 'package.template.json'), (err, data) => {
+      if (err) {
+        reject(err);
+      } else {
+        resolve(JSON.parse(data))
+      }
+    });
+  });
+  const sanitizedAppName = appTitle.toLowerCase().replace(/\s/g, '-');
+  const releaseDir = path.join(baseDir, `apps/${sanitizedAppName}`);
+  // update the contents based on the app title
+  const newContents = JSON.stringify({
+    ...json,
+    name: sanitizedAppName,
+    build: {
+      ...json.build,
+      productName: appTitle,
+      appId: `com.rockabit.webtray.${appTitle.replace(/\s/g, '')}`,
+      directories: {
+        ...json.build.directories,
+        output: releaseDir
+      }
+    }
+  }, null, "\t");
+  // write the data to file
+  await new Promise((resolve, reject) => {
+    writeFile(
+      path.join(appTemplateDir, 'package.json'),
+      newContents,
+      resolve
+    )
+  });
+
+  return releaseDir;
+}
+
+const packageApp = async () => (
+  new Promise((resolve, reject) => {
+    shelljs.cd(appTemplateDir);
+    shelljs.config.execPath = path.join(baseDir, 'node_modules/node/bin/node'); // use node from dependencies
+    const { code, stdout, stderr } = shelljs.exec(`npm i && npm run pack`);
+    console.log(`ShellJS stdout:`, stdout);
+    if (code !== 0) {
+      reject(stderr);
+      shelljs.exit(1);
+    } else {
+      resolve();
+    }
+  })
+);
+
+/**
+ * Store app config data in JSON file
+ */
+ipcMain.on('create-app', async (event, title, url, appIcon, trayIconLarge, trayIconSmall) => {
+  try {
+    // Create app icon
+    await saveAppIcon(appIcon, true);
+    // Create tray icons
+    await saveTrayIcon(trayIconLarge, true);
+    await saveTrayIcon(trayIconSmall, false);
+    // Create app config file
+    await writeAppConfig({
+      title,
+      url,
+      icon: 'assets/icons/tray.png'
+    });
+    // Create app's package.json
+    const releaseDir = await createAppPackageFile(title);
+    // Package app
+    await packageApp();
+    event.reply('create-app-response', releaseDir);
+    shell.showItemInFolder(releaseDir);
+  } catch (err) {
+    console.error(`Failed to package app.`, err);
+    event.reply('create-app-error', err);
+  }
+});

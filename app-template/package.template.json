@@ -1,7 +1,7 @@
 {
   "name": "web-tray",
   "version": "1.0.0",
-  "description": "Electron app that generates apps with a single webpage available via a tray icon",
+  "description": "Electron app that makes a single webpage available via a tray icon",
   "author": "Ralph Kok",
   "license": "BSD-2-Clause",
   "main": "./index.js",
@@ -12,8 +12,8 @@
     "postinstall": "electron-builder install-app-deps"
   },
   "build": {
-    "productName": "WebTray",
-    "appId": "com.rockabit.WebTray",
+    "productName": "Web Tray",
+    "appId": "com.rockabit.webtray.WebTray",
     "mac": {
       "category": "web.tray"
     },
@@ -32,9 +32,7 @@
       "package.json"
     ],
     "extraResources": [
-      "assets/",
-      "app-template/",
-      "node_modules/"
+      "assets/"
     ]
   },
   "devDependencies": {
@@ -43,9 +41,6 @@
   },
   "dependencies": {
     "command-line-args": "^5.1.1",
-    "menubar": "^9.0.1",
-    "node": "^15.0.1",
-    "shelljs": "^0.8.4",
-    "url": "^0.11.0"
+    "menubar": "^9.0.1"
   }
 }

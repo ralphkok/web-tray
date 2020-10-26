@@ -1,2 +1,9 @@
 node_modules/
 release/
+app-template/node_modules/
+app-template/release/
+app-template/assets
+app-template/build
+app-template/package.json
+app-template/package-lock.json
+apps/
