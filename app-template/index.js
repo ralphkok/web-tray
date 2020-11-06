@@ -1,6 +1,6 @@
 const path = require('path');
 const { menubar } = require('menubar');
-const { BrowserWindow, Menu } = require('electron');
+const { BrowserWindow, Menu, shell } = require('electron');
 const { readFile } = require('fs');
 
 const commandLineArgs = require('command-line-args');
@@ -13,33 +13,11 @@ const baseDir = args.debug
   : path.join(__dirname, '..');
 
 /**
- * Open new windows in a separate, movable, closable window.
+ * Open new windows in the default browser
  */
-const onNewWindow = (event, url, frameName, disposition, options, additionalFeatures, referrer, postBody) => {
+const onNewWindow = (event, url) => {
   event.preventDefault();
-  const win = new BrowserWindow({
-    webContents: options.webContents, // use existing webContents if provided
-    show: false,
-    autoHideMenuBar: false,
-    movable: true,
-    resizable: true,
-    focusable: true,
-    closable: true,
-  });
-  win.once('ready-to-show', () => win.show());
-  if (!options.webContents) {
-    const loadOptions = {
-      httpReferrer: referrer
-    };
-    if (postBody != null) {
-      const { data, contentType, boundary } = postBody;
-      loadOptions.postData = postBody.data;
-      loadOptions.extraHeaders = `content-type: ${contentType}; boundary=${boundary}`;
-    }
-
-    win.loadURL(url, loadOptions); // existing webContents will be navigated automatically
-  }
-  event.newGuest = win;
+  shell.openExternal(url);
 };
 
 /**
